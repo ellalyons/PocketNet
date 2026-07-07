@@ -22,41 +22,60 @@ void setup()
 
     Serial.println();
     Serial.println("=================================");
-    Serial.println(" PocketNet Hardware Bring-up");
+    Serial.println(" PocketNet Input Bring-up");
     Serial.println("=================================");
 
-    // RGB LED
     pinMode(PIN_RGB_R, OUTPUT);
     pinMode(PIN_RGB_G, OUTPUT);
     pinMode(PIN_RGB_B, OUTPUT);
-
-    // Buzzer
     pinMode(PIN_BUZZER, OUTPUT);
 
-    // Turn everything off
+    pinMode(PIN_LEFT, INPUT);
+    pinMode(PIN_RIGHT, INPUT);
+    pinMode(PIN_SELECT, INPUT);
+    pinMode(PIN_ALT, INPUT);
+
     setRGB(LOW, LOW, LOW);
     digitalWrite(PIN_BUZZER, LOW);
+
+    Serial.println("Press buttons / move joystick...");
 }
 
 void loop()
 {
-    Serial.println("Testing RED");
-    setRGB(HIGH, LOW, LOW);
-    delay(1000);
+    bool leftPressed   = digitalRead(PIN_LEFT);
+    bool rightPressed  = digitalRead(PIN_RIGHT);
+    bool selectPressed = digitalRead(PIN_SELECT);
+    bool altPressed    = digitalRead(PIN_ALT);
 
-    Serial.println("Testing GREEN");
-    setRGB(LOW, HIGH, LOW);
-    delay(1000);
+    if (leftPressed) {
+        Serial.println("LEFT pressed");
+        setRGB(HIGH, LOW, LOW);
+        beep(50);
+        delay(250);
+    }
 
-    Serial.println("Testing BLUE");
-    setRGB(LOW, LOW, HIGH);
-    delay(1000);
+    if (rightPressed) {
+        Serial.println("RIGHT pressed");
+        setRGB(LOW, HIGH, LOW);
+        beep(50);
+        delay(250);
+    }
 
-    Serial.println("Testing OFF");
+    if (selectPressed) {
+        Serial.println("SELECT pressed");
+        setRGB(LOW, LOW, HIGH);
+        beep(50);
+        delay(250);
+    }
+
+    if (altPressed) {
+        Serial.println("BUTTON pressed");
+        setRGB(HIGH, HIGH, HIGH);
+        beep(50);
+        delay(250);
+    }
+
     setRGB(LOW, LOW, LOW);
-    delay(500);
-
-    Serial.println("Testing BUZZER");
-    beep(100);
-    delay(900);
+    delay(20);
 }
