@@ -2,8 +2,13 @@
 #include <LovyanGFX.hpp>
 #include "hardware_config.h"
 
+// ============================================================
+// Display configuration
+// ============================================================
+
 class LGFX : public lgfx::LGFX_Device
 {
+private:
     lgfx::Panel_ST7735S panel;
     lgfx::Bus_SPI bus;
 
@@ -61,6 +66,10 @@ public:
 
 LGFX display;
 
+// ============================================================
+// Buzzer and RGB LED
+// ============================================================
+
 constexpr int BUZZER_CHANNEL = 0;
 constexpr int BUZZER_RESOLUTION = 8;
 
@@ -78,70 +87,190 @@ void playTone(uint16_t frequency, uint16_t durationMs)
     ledcWriteTone(BUZZER_CHANNEL, 0);
 }
 
-void showStatus(const char* item, const char* status, uint16_t colour)
+// ============================================================
+// Button handling
+// ============================================================
+
+struct Button
 {
-    display.fillRect(0, 48, 128, 55, TFT_BLACK);
+    uint8_t pin;
+    bool previousState;
+    unsigned long lastChangeTime;
+};
 
-    display.setTextSize(1);
-    display.setTextColor(TFT_WHITE, TFT_BLACK);
-    display.setCursor(10, 55);
-    display.println(item);
+Button leftButton   = {PIN_LEFT, false, 0};
+Button rightButton  = {PIN_RIGHT, false, 0};
+Button selectButton = {PIN_SELECT, false, 0};
+Button backButton   = {PIN_ALT, false, 0};
 
-    display.setTextColor(colour, TFT_BLACK);
-    display.setCursor(10, 75);
-    display.println(status);
+constexpr unsigned long DEBOUNCE_MS = 40;
+
+bool wasPressed(Button& button)
+{
+    const bool currentState = digitalRead(button.pin);
+    const unsigned long now = millis();
+
+    bool pressed = false;
+
+    if (currentState != button.previousState &&
+        now - button.lastChangeTime >= DEBOUNCE_MS)
+    {
+        button.lastChangeTime = now;
+
+        if (currentState)
+        {
+            pressed = true;
+        }
+
+        button.previousState = currentState;
+    }
+
+    return pressed;
 }
 
-void runStartupSelfTest()
+// ============================================================
+// Menu
+// ============================================================
+
+const char* menuItems[] =
+{
+    "WiFi Scan",
+    "Signal Meter",
+    "BLE Scan",
+    "Network Tools",
+    "Settings"
+};
+
+constexpr int MENU_ITEM_COUNT =
+    sizeof(menuItems) / sizeof(menuItems[0]);
+
+int selectedItem = 0;
+bool showingFeaturePage = false;
+
+void drawHeader()
 {
     display.fillScreen(TFT_BLACK);
 
     display.setTextColor(TFT_GREEN, TFT_BLACK);
     display.setTextSize(2);
-    display.setCursor(10, 12);
+    display.setCursor(8, 6);
     display.println("PocketNet");
 
-    display.setTextColor(TFT_WHITE, TFT_BLACK);
+    display.drawFastHLine(6, 29, 116, TFT_DARKGREY);
+}
+
+void drawMenu()
+{
+    showingFeaturePage = false;
+    drawHeader();
+
     display.setTextSize(1);
-    display.setCursor(10, 35);
-    display.println("Startup self-test");
 
-    showStatus("RGB LED", "Testing red", TFT_RED);
-    setRGB(HIGH, LOW, LOW);
-    delay(500);
+    for (int i = 0; i < MENU_ITEM_COUNT; i++)
+    {
+        const int y = 38 + (i * 17);
 
-    showStatus("RGB LED", "Testing green", TFT_GREEN);
+        if (i == selectedItem)
+        {
+            display.fillRoundRect(5, y - 3, 118, 15, 3, TFT_GREEN);
+            display.setTextColor(TFT_BLACK, TFT_GREEN);
+            display.setCursor(10, y);
+            display.print("> ");
+            display.println(menuItems[i]);
+        }
+        else
+        {
+            display.setTextColor(TFT_WHITE, TFT_BLACK);
+            display.setCursor(10, y);
+            display.print("  ");
+            display.println(menuItems[i]);
+        }
+    }
+
+    Serial.print("Selected menu item: ");
+    Serial.println(menuItems[selectedItem]);
+}
+
+void showFeaturePage()
+{
+    showingFeaturePage = true;
+    drawHeader();
+
+    display.setTextColor(TFT_CYAN, TFT_BLACK);
+    display.setTextSize(1);
+    display.setCursor(8, 43);
+    display.println(menuItems[selectedItem]);
+
+    display.setTextColor(TFT_WHITE, TFT_BLACK);
+    display.setCursor(8, 65);
+    display.println("Feature coming next.");
+
+    display.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+    display.setCursor(8, 100);
+    display.println("Press BUTTON");
+    display.setCursor(8, 112);
+    display.println("to go back.");
+
+    Serial.print("Opened: ");
+    Serial.println(menuItems[selectedItem]);
+
     setRGB(LOW, HIGH, LOW);
-    delay(500);
-
-    showStatus("RGB LED", "Testing blue", TFT_BLUE);
-    setRGB(LOW, LOW, HIGH);
-    delay(500);
-
+    playTone(2400, 70);
     setRGB(LOW, LOW, LOW);
+}
 
-    showStatus("Buzzer", "Testing tone", TFT_YELLOW);
-    playTone(2500, 150);
-    delay(250);
+void moveSelection(int direction)
+{
+    selectedItem += direction;
 
-    showStatus("Controls", "Ready", TFT_GREEN);
-    delay(700);
+    if (selectedItem < 0)
+    {
+        selectedItem = MENU_ITEM_COUNT - 1;
+    }
 
+    if (selectedItem >= MENU_ITEM_COUNT)
+    {
+        selectedItem = 0;
+    }
+
+    playTone(1800, 25);
+    drawMenu();
+}
+
+// ============================================================
+// Startup
+// ============================================================
+
+void showStartupScreen()
+{
     display.fillScreen(TFT_BLACK);
 
     display.setTextColor(TFT_GREEN, TFT_BLACK);
     display.setTextSize(2);
-    display.setCursor(10, 20);
+    display.setCursor(10, 28);
     display.println("PocketNet");
 
     display.setTextColor(TFT_WHITE, TFT_BLACK);
     display.setTextSize(1);
-    display.setCursor(10, 55);
-    display.println("Hardware ready");
+    display.setCursor(22, 60);
+    display.println("Network Toolkit");
 
-    display.setCursor(10, 75);
-    display.println("Next: main menu");
+    display.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+    display.setCursor(36, 82);
+    display.println("v0.1.0");
+
+    setRGB(LOW, HIGH, LOW);
+    playTone(2200, 80);
+    delay(80);
+    playTone(2800, 100);
+
+    delay(1000);
+    setRGB(LOW, LOW, LOW);
 }
+
+// ============================================================
+// Arduino lifecycle
+// ============================================================
 
 void setup()
 {
@@ -168,12 +297,40 @@ void setup()
     display.init();
     display.setRotation(0);
 
-    Serial.println("PocketNet startup self-test");
-    runStartupSelfTest();
-    Serial.println("Startup self-test complete");
+    Serial.println();
+    Serial.println("PocketNet interactive menu starting");
+
+    showStartupScreen();
+    drawMenu();
 }
 
 void loop()
 {
-    delay(100);
+    if (!showingFeaturePage)
+    {
+        if (wasPressed(leftButton))
+        {
+            moveSelection(-1);
+        }
+
+        if (wasPressed(rightButton))
+        {
+            moveSelection(1);
+        }
+
+        if (wasPressed(selectButton))
+        {
+            showFeaturePage();
+        }
+    }
+    else
+    {
+        if (wasPressed(backButton))
+        {
+            playTone(1400, 50);
+            drawMenu();
+        }
+    }
+
+    delay(5);
 }
