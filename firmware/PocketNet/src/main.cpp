@@ -1,131 +1,19 @@
 #include <Arduino.h>
 #include <WiFi.h>
-#include <LovyanGFX.hpp>
 #include <cstring>
+
 #include "hardware_config.h"
+#include "display_config.h"
+#include "hardware_io.h"
+#include "pocketnet_input.h"
+
+using namespace HardwareIO;
 
 // ============================================================
 // Display configuration
 // ============================================================
 
-class LGFX : public lgfx::LGFX_Device
-{
-private:
-    lgfx::Panel_ST7735S panel;
-    lgfx::Bus_SPI bus;
-
-public:
-    LGFX()
-    {
-        {
-            auto cfg = bus.config();
-
-            cfg.spi_host = VSPI_HOST;
-            cfg.spi_mode = 0;
-            cfg.freq_write = 40000000;
-            cfg.freq_read = 40000000;
-            cfg.spi_3wire = false;
-            cfg.use_lock = true;
-            cfg.dma_channel = 1;
-
-            cfg.pin_sclk = PIN_TFT_SCK;
-            cfg.pin_mosi = PIN_TFT_MOSI;
-            cfg.pin_miso = -1;
-            cfg.pin_dc = PIN_TFT_DC;
-
-            bus.config(cfg);
-            panel.setBus(&bus);
-        }
-
-        {
-            auto cfg = panel.config();
-
-            cfg.pin_cs = -1;
-            cfg.pin_rst = PIN_TFT_RST;
-            cfg.pin_busy = -1;
-
-            cfg.memory_width = 132;
-            cfg.memory_height = 132;
-            cfg.panel_width = 128;
-            cfg.panel_height = 128;
-
-            cfg.offset_x = 2;
-            cfg.offset_y = 1;
-            cfg.offset_rotation = 2;
-
-            cfg.readable = false;
-            cfg.invert = false;
-            cfg.rgb_order = false;
-            cfg.dlen_16bit = false;
-            cfg.bus_shared = false;
-
-            panel.config(cfg);
-        }
-
-        setPanel(&panel);
-    }
-};
-
-LGFX display;
-
-// ============================================================
-// RGB LED and buzzer
-// ============================================================
-
-constexpr int BUZZER_CHANNEL = 0;
-constexpr int BUZZER_RESOLUTION = 8;
-
-void setRGB(bool red, bool green, bool blue)
-{
-    digitalWrite(PIN_RGB_R, red);
-    digitalWrite(PIN_RGB_G, green);
-    digitalWrite(PIN_RGB_B, blue);
-}
-
-void playTone(uint16_t frequency, uint16_t durationMs)
-{
-    ledcWriteTone(BUZZER_CHANNEL, frequency);
-    delay(durationMs);
-    ledcWriteTone(BUZZER_CHANNEL, 0);
-}
-
-// ============================================================
-// Button handling
-// ============================================================
-
-struct Button
-{
-    uint8_t pin;
-    bool previousState;
-    unsigned long lastChangeTime;
-};
-
-Button leftButton   = {PIN_LEFT, false, 0};
-Button rightButton  = {PIN_RIGHT, false, 0};
-Button selectButton = {PIN_SELECT, false, 0};
-Button backButton   = {PIN_ALT, false, 0};
-
-constexpr unsigned long DEBOUNCE_MS = 40;
-
-bool wasPressed(Button& button)
-{
-    const bool currentState = digitalRead(button.pin);
-    const unsigned long now = millis();
-
-    if (currentState != button.previousState &&
-        now - button.lastChangeTime >= DEBOUNCE_MS)
-    {
-        button.lastChangeTime = now;
-        button.previousState = currentState;
-
-        if (currentState)
-        {
-            return true;
-        }
-    }
-
-    return false;
-}
+PocketNetDisplay display;
 
 // ============================================================
 // Application state
@@ -867,30 +755,13 @@ void setup()
     Serial.begin(115200);
     delay(500);
 
-    pinMode(PIN_RGB_R, OUTPUT);
-    pinMode(PIN_RGB_G, OUTPUT);
-    pinMode(PIN_RGB_B, OUTPUT);
-
-    pinMode(PIN_LEFT, INPUT);
-    pinMode(PIN_RIGHT, INPUT);
-    pinMode(PIN_SELECT, INPUT);
-    pinMode(PIN_ALT, INPUT);
+    Input::begin();
 
     pinMode(PIN_TFT_BL, OUTPUT);
     digitalWrite(PIN_TFT_BL, LOW);
 
-    setRGB(LOW, LOW, LOW);
 
-    ledcSetup(
-        BUZZER_CHANNEL,
-        2500,
-        BUZZER_RESOLUTION
-    );
-
-    ledcAttachPin(
-        PIN_BUZZER,
-        BUZZER_CHANNEL
-    );
+    HardwareIO::begin();
 
     display.init();
     display.setRotation(0);
@@ -910,20 +781,22 @@ void setup()
 
 void loop()
 {
+    Input::update();
+
     switch (currentScreen)
     {
         case Screen::MainMenu:
-            if (wasPressed(leftButton))
+            if (Input::wasPressed(Input::Button::Left))
             {
                 moveMenuSelection(-1);
             }
 
-            if (wasPressed(rightButton))
+            if (Input::wasPressed(Input::Button::Right))
             {
                 moveMenuSelection(1);
             }
 
-            if (wasPressed(selectButton))
+            if (Input::wasPressed(Input::Button::Select))
             {
                 openSelectedMenuItem();
             }
@@ -931,17 +804,17 @@ void loop()
             break;
 
         case Screen::WiFiResults:
-            if (wasPressed(leftButton))
+            if (Input::wasPressed(Input::Button::Left))
             {
                 moveWiFiSelection(-1);
             }
 
-            if (wasPressed(rightButton))
+            if (Input::wasPressed(Input::Button::Right))
             {
                 moveWiFiSelection(1);
             }
 
-            if (wasPressed(selectButton))
+            if (Input::wasPressed(Input::Button::Select))
             {
                 saveSelectedSignalTarget();
 
@@ -952,7 +825,7 @@ void loop()
                 }
             }
 
-            if (wasPressed(backButton))
+            if (Input::wasPressed(Input::Button::Back))
             {
                 playTone(1400, 40);
                 drawMainMenu();
@@ -961,29 +834,33 @@ void loop()
             break;
 
         case Screen::SignalMeter:
-            if (wasPressed(leftButton) ||
-                wasPressed(rightButton))
+            if (
+                Input::wasPressed(Input::Button::Left) ||
+                Input::wasPressed(Input::Button::Right)
+            )
             {
                 playTone(1600, 30);
                 drawWiFiResult();
                 break;
             }
 
-            if (wasPressed(selectButton))
+            if (Input::wasPressed(Input::Button::Select))
             {
                 refreshSignalMeter();
                 break;
             }
 
-            if (wasPressed(backButton))
+            if (Input::wasPressed(Input::Button::Back))
             {
                 playTone(1400, 40);
                 drawWiFiResult();
                 break;
             }
 
-            if (millis() - lastSignalRefresh >=
-                SIGNAL_REFRESH_INTERVAL_MS)
+            if (
+                millis() - lastSignalRefresh >=
+                SIGNAL_REFRESH_INTERVAL_MS
+            )
             {
                 refreshSignalMeter();
             }
@@ -991,7 +868,7 @@ void loop()
             break;
 
         case Screen::NoSignalTarget:
-            if (wasPressed(backButton))
+            if (Input::wasPressed(Input::Button::Back))
             {
                 setRGB(LOW, LOW, LOW);
                 playTone(1400, 40);
@@ -1001,7 +878,7 @@ void loop()
             break;
 
         case Screen::Placeholder:
-            if (wasPressed(backButton))
+            if (Input::wasPressed(Input::Button::Back))
             {
                 playTone(1400, 40);
                 drawMainMenu();
