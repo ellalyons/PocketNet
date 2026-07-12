@@ -6,6 +6,7 @@
 #include "display_config.h"
 #include "hardware_io.h"
 #include "pocketnet_input.h"
+#include "ble_scanner.h"
 
 using namespace HardwareIO;
 
@@ -25,7 +26,8 @@ enum class Screen
     Placeholder,
     WiFiResults,
     SignalMeter,
-    NoSignalTarget
+    NoSignalTarget,
+    BLEResults
 };
 
 Screen currentScreen = Screen::MainMenu;
@@ -46,6 +48,9 @@ int selectedMenuItem = 0;
 
 int wifiNetworkCount = 0;
 int selectedNetwork = 0;
+
+// BLE
+int selectedBLEDevice = 0;
 
 // Saved access-point target
 bool signalTargetValid = false;
@@ -647,6 +652,155 @@ void openSignalMeter()
 }
 
 // ============================================================
+// BLE scanner
+// ============================================================
+
+void drawBLEResult()
+{
+    currentScreen = Screen::BLEResults;
+    setRGB(LOW, LOW, LOW);
+
+    drawHeader();
+    display.setTextSize(1);
+
+    const int deviceCount = BLEScanner::count();
+
+    if (deviceCount <= 0)
+    {
+        display.setTextColor(TFT_RED, TFT_BLACK);
+        display.setCursor(8, 47);
+        display.println("No BLE devices");
+
+        display.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+        display.setCursor(8, 88);
+        display.println("SELECT: Rescan");
+
+        display.setCursor(8, 104);
+        display.println("BUTTON: Back");
+
+        return;
+    }
+
+    const BLEScanner::Device* device =
+        BLEScanner::getDevice(selectedBLEDevice);
+
+    if (device == nullptr)
+    {
+        return;
+    }
+
+    String displayName = device->name;
+
+    if (displayName.length() > 18)
+    {
+        displayName =
+            displayName.substring(0, 18);
+    }
+
+    display.setTextColor(TFT_CYAN, TFT_BLACK);
+    display.setCursor(8, 37);
+    display.printf(
+        "%d/%d",
+        selectedBLEDevice + 1,
+        deviceCount
+    );
+
+    display.setTextColor(TFT_WHITE, TFT_BLACK);
+    display.setCursor(8, 52);
+    display.println(displayName);
+
+    display.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+    display.setCursor(8, 67);
+    display.println(device->address);
+
+    display.setTextColor(
+        signalColour(device->rssi),
+        TFT_BLACK
+    );
+
+    display.setTextSize(2);
+    display.setCursor(8, 82);
+    display.printf("%d", device->rssi);
+
+    display.setTextSize(1);
+    display.setTextColor(TFT_WHITE, TFT_BLACK);
+    display.setCursor(69, 89);
+    display.println("dBm");
+
+    display.setCursor(8, 104);
+    display.println(
+        device->connectable
+            ? "Connectable"
+            : "Beacon / non-connect"
+    );
+
+    display.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+    display.setCursor(8, 117);
+    display.println("< > Browse  SEL Scan");
+}
+
+void runBLEScan()
+{
+    currentScreen = Screen::BLEResults;
+
+    drawHeader();
+
+    display.setTextSize(1);
+    display.setTextColor(TFT_YELLOW, TFT_BLACK);
+    display.setCursor(8, 50);
+    display.println("Scanning BLE...");
+
+    display.setTextColor(TFT_WHITE, TFT_BLACK);
+    display.setCursor(8, 70);
+    display.println("Please wait");
+
+    setRGB(LOW, LOW, HIGH);
+
+    const bool foundDevices =
+        BLEScanner::scan(5000);
+
+    selectedBLEDevice = 0;
+
+    clearRGB();
+
+    if (foundDevices)
+    {
+        playTone(2600, 80);
+    }
+    else
+    {
+        playTone(900, 150);
+    }
+
+    drawBLEResult();
+}
+
+void moveBLESelection(int direction)
+{
+    const int deviceCount = BLEScanner::count();
+
+    if (deviceCount <= 0)
+    {
+        return;
+    }
+
+    selectedBLEDevice += direction;
+
+    if (selectedBLEDevice < 0)
+    {
+        selectedBLEDevice = deviceCount - 1;
+    }
+
+    if (selectedBLEDevice >= deviceCount)
+    {
+        selectedBLEDevice = 0;
+    }
+
+    playTone(1800, 20);
+    drawBLEResult();
+}
+
+// ============================================================
 // Navigation
 // ============================================================
 
@@ -707,6 +861,10 @@ void openSelectedMenuItem()
             openSignalMeter();
             break;
 
+        case 2:
+            runBLEScan();
+            break;
+
         default:
             drawPlaceholder();
             break;
@@ -762,6 +920,8 @@ void setup()
 
 
     HardwareIO::begin();
+
+    BLEScanner::begin();    
 
     display.init();
     display.setRotation(0);
@@ -876,6 +1036,30 @@ void loop()
             }
 
             break;
+
+        case Screen::BLEResults:
+            if (Input::wasPressed(Input::Button::Left))
+            {
+                moveBLESelection(-1);
+            }
+
+            if (Input::wasPressed(Input::Button::Right))
+            {
+                moveBLESelection(1);
+            }
+
+            if (Input::wasPressed(Input::Button::Select))
+            {
+                runBLEScan();
+            }
+
+            if (Input::wasPressed(Input::Button::Back))
+            {
+                playTone(1400, 40);
+                drawMainMenu();
+            }
+
+    break;    
 
         case Screen::Placeholder:
             if (Input::wasPressed(Input::Button::Back))
